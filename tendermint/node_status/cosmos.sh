@@ -168,17 +168,17 @@ function __ServerLoad() {
 function __LastChainBlock() {
     # get the last explorer's block
     if [[ ${CURL} == *"v1/status"* ]]; then
-        LATEST_CHAIN_BLOCK=$(curl -sk ${CURL} | jq ".block_height" | tr -d '"')
+        LATEST_CHAIN_BLOCK=$(curl -sk ${CURL} | jq -r '.block_height')
         if [[ ${LATEST_CHAIN_BLOCK} == "null" ]]; then
-            LATEST_CHAIN_BLOCK=$(curl -sk ${CURL} | jq ".data.block_height" | tr -d '"')
+            LATEST_CHAIN_BLOCK=$(curl -sk ${CURL} | jq -r '.data.block_height')
         fi
     elif [[ ${CURL} == *"bank/total"* ]] || [[ ${CURL} == *"blocks/latest"* ]]; then
-        LATEST_CHAIN_BLOCK=$(curl -sk ${CURL} | jq ".height" | tr -d '"')
+        LATEST_CHAIN_BLOCK=$(curl -sk ${CURL} | jq -r '.height')
         if [[ ${LATEST_CHAIN_BLOCK} == "null" ]]; then
-            LATEST_CHAIN_BLOCK=$(curl -sk ${CURL} | jq ".block.header.height" | tr -d '"')
+            LATEST_CHAIN_BLOCK=$(curl -sk ${CURL} | jq -r '.block.header.height')
         fi
     elif [[ ${CURL} == *"block?latest"* ]]; then
-        LATEST_CHAIN_BLOCK=$(curl -sk ${CURL} | jq ".result.block.header.height" | tr -d '"')
+        LATEST_CHAIN_BLOCK=$(curl -sk ${CURL} | jq -r '.result.block.header.height')
     else
         LATEST_CHAIN_BLOCK="0"
     fi
@@ -193,9 +193,9 @@ function __SignedAndMissedBlocks() {
     LOOKBEHIND_BLOCKS=100
 
     # get slashing params
-    SLASHING=$(${COSMOS} q slashing params -o json --node ${NODE} --home ${NODE_HOME})
-    WINDOW=$(echo ${SLASHING} | jq ".signed_blocks_window" | tr -d '"')
-    MIN_SIGNED=$(echo ${SLASHING} | jq ".min_signed_per_window" | tr -d '"')
+    SLASHING=$(${COSMOS} q slashing params --node ${NODE} --home ${NODE_HOME} --output json)
+    WINDOW=$(echo ${SLASHING} | jq -r '.signed_blocks_window')
+    MIN_SIGNED=$(echo ${SLASHING} | jq -r '.min_signed_per_window')
     JAILED_AFTER=$(echo ${WINDOW}-${WINDOW}*${MIN_SIGNED} | bc -l | grep -oE "[0-9]*" | awk 'NR==1 {print; exit}')
     # LOOKBEHIND_BLOCKS=${JAILED_AFTER}
     MISSED_BLOCKS_FOR_ALARM=$(echo ${JAILED_AFTER}/10 | bc -l | grep -oE "[0-9]*" | awk 'NR==1 {print; exit}')
@@ -203,15 +203,15 @@ function __SignedAndMissedBlocks() {
 
     # get some info about node
     NODE_STATUS_TOTAL=$(curl -s localhost:${PORT}/status)
-    VALIDATOR_ADDRESS=$(echo ${NODE_STATUS_TOTAL} | jq .result.validator_info.address | tr -d '"')
-    LATEST_BLOCK_HEIGHT=$(echo ${NODE_STATUS_TOTAL} | jq .result.sync_info.latest_block_height | tr -d '"')
-    LATEST_BLOCK_TIME=$(echo ${NODE_STATUS_TOTAL} | jq .result.sync_info.latest_block_time | tr -d '"')
+    VALIDATOR_ADDRESS=$(echo ${NODE_STATUS_TOTAL} | jq -r '.result.validator_info.address')
+    LATEST_BLOCK_HEIGHT=$(echo ${NODE_STATUS_TOTAL} | jq -r '.result.sync_info.latest_block_height')
+    LATEST_BLOCK_TIME=$(echo ${NODE_STATUS_TOTAL} | jq -r '.result.sync_info.latest_block_time')
 
     # check only 100 last blocks
     START_BLOCK=$((${LATEST_BLOCK_HEIGHT}-${LOOKBEHIND_BLOCKS}+1))
     for (( BLOCK = ${START_BLOCK}; BLOCK <= ${LATEST_BLOCK_HEIGHT}; BLOCK++ )); do
         # check for validator signature
-        SIGNATURE=$(curl -s localhost:${PORT}/block?height=${BLOCK} | jq .result.block.last_commit.signatures[].validator_address | tr -d '"' | grep ${VALIDATOR_ADDRESS})
+        SIGNATURE=$(curl -s localhost:${PORT}/block?height=${BLOCK} | jq -r '.result.block.last_commit.signatures[].validator_address' | grep ${VALIDATOR_ADDRESS})
 
         # if signature exists > signed + 1
         if [[ ${SIGNATURE} != "" ]]; then
@@ -238,7 +238,7 @@ function __SignedAndMissedBlocks() {
         START_BLOCK=$((${LATEST_BLOCK_HEIGHT}-${LOOKBEHIND_BLOCKS}+1))
         for (( BLOCK = ${START_BLOCK}; BLOCK <= ${LATEST_BLOCK_HEIGHT}; BLOCK++ )); do
             # check for validator signature
-            SIGNATURE=$(curl -s localhost:${PORT}/block?height=${BLOCK} | jq .result.block.last_commit.signatures[].validator_address | tr -d '"' | grep ${VALIDATOR_ADDRESS})
+            SIGNATURE=$(curl -s localhost:${PORT}/block?height=${BLOCK} | jq -r '.result.block.last_commit.signatures[].validator_address' | grep ${VALIDATOR_ADDRESS})
 
             # if signature exists > signed + 1
             if [[ ${SIGNATURE} != "" ]]; then
@@ -270,12 +270,12 @@ function __SignedAndMissedBlocks() {
 function __UnvotedProposals() {
 
     # get proposals
-    PROPOSALS=$(${COSMOS} q gov proposals --node ${NODE} --home ${NODE_HOME} --limit 999999999 --output json 2>&1)
+    PROPOSALS=$(${COSMOS} q gov proposals --node ${NODE} --home ${NODE_HOME} --output json --limit 999999999 2>&1)
 
     # if at least one proposal exists
     if [[ ${PROPOSALS} != *"no proposals found"* ]]; then
         # get array of active proposals
-        ACTIVE_PROPOSALS_STRING=$(echo ${PROPOSALS} | jq '.proposals[] | select(.status=="PROPOSAL_STATUS_VOTING_PERIOD")' | jq '.proposal_id' | tr -d '"')
+        ACTIVE_PROPOSALS_STRING=$(echo ${PROPOSALS} | jq -r '.proposals[] | select(.status=="PROPOSAL_STATUS_VOTING_PERIOD") | .proposal_id')
         ACTIVE_PROPOSALS_ARRAY=($(echo "${ACTIVE_PROPOSALS_STRING}" | tr ' ' '\n'))
 
         # init array of unvoted proposals
@@ -284,7 +284,7 @@ function __UnvotedProposals() {
         # run loop on each proposal
         for i in "${!ACTIVE_PROPOSALS_ARRAY[@]}"; do
             # if vote does not exist, add proposal id to 'UNVOTED_ARRAY'
-            VOTE=$(${COSMOS} q gov votes ${ACTIVE_PROPOSALS_ARRAY[i]} --limit 999999999 --node ${NODE} --home ${NODE_HOME} --output json | jq '.votes[].voter' | tr -d '"' | grep ${DELEGATOR_ADDRESS})
+            VOTE=$(${COSMOS} q gov votes ${ACTIVE_PROPOSALS_ARRAY[i]} --node ${NODE} --home ${NODE_HOME} --output json --limit 999999999 | jq -r '.votes[].voter' | grep ${DELEGATOR_ADDRESS})
             if [[ ${VOTE} == "" ]]; then UNVOTED_ARRAY+=(${ACTIVE_PROPOSALS_ARRAY[i]}); fi
         done
 
@@ -315,14 +315,14 @@ function __AverageBlockExecutionTime() {
     NODE_STATUS_TOTAL=$(curl -s localhost:${PORT}/status)
 
     # get last block time and height
-    LATEST_BLOCK_HEIGHT=$(echo ${NODE_STATUS_TOTAL} | jq .result.sync_info.latest_block_height | tr -d '"')
-    LATEST_BLOCK_TIME=$(echo ${NODE_STATUS_TOTAL} | jq .result.sync_info.latest_block_time | tr -d '"' | grep -oE "[0-9]*:[0-9]*:[0-9]*")
+    LATEST_BLOCK_HEIGHT=$(echo ${NODE_STATUS_TOTAL} | jq -r '.result.sync_info.latest_block_height')
+    LATEST_BLOCK_TIME=$(echo ${NODE_STATUS_TOTAL} | jq -r '.result.sync_info.latest_block_time' | grep -oE "[0-9]*:[0-9]*:[0-9]*")
     IFS=':' read -ra HMS <<< "$LATEST_BLOCK_TIME"
     LATEST_BLOCK_TIME_IN_SEC=$(echo ${HMS[0]}*3600+${HMS[1]}*60+${HMS[2]} | bc -l)
 
     # get upgrade block time and height
     UPGRADE_BLOCK_HEIGHT=$((${LATEST_BLOCK_HEIGHT}-${LOOKBEHIND_BLOCKS}))
-    UPGRADE_BLOCK_TIME=$(${COSMOS} q block ${UPGRADE_BLOCK_HEIGHT} --node ${NODE} --home ${NODE_HOME} | jq ".block.header.time" | tr -d '"' | grep -oE "[0-9]*:[0-9]*:[0-9]*")
+    UPGRADE_BLOCK_TIME=$(${COSMOS} q block ${UPGRADE_BLOCK_HEIGHT} --node ${NODE} --home ${NODE_HOME} --output json | jq -r '.block.header.time' | grep -oE "[0-9]*:[0-9]*:[0-9]*")
     IFS=':' read -ra HMS <<< "${UPGRADE_BLOCK_TIME}"
     UPGRADE_BLOCK_TIME_IN_SEC=$(echo ${HMS[0]}*3600+${HMS[1]}*60+${HMS[2]} | bc -l)
 
@@ -356,8 +356,8 @@ function __UpgradePlan() {
 
     # if smth is planned, then calculate approximate upgrade time
     if [[ ${UPGRADE_PLAN} != *"no upgrade scheduled"* ]]; then
-        UPGRADE_HEIGHT=$(echo ${UPGRADE_PLAN} | jq ".height" | tr -d '"')
-        UPGRADE_NAME=$(echo ${UPGRADE_PLAN} | jq ".name" | tr -d '"')
+        UPGRADE_HEIGHT=$(echo ${UPGRADE_PLAN} | jq -r '.height')
+        UPGRADE_NAME=$(echo ${UPGRADE_PLAN} | jq -r '.name')
 
         __AverageBlockExecutionTime
         BLOCKS_BEFORE_UPGRADE=$((${UPGRADE_HEIGHT}-${LATEST_BLOCK_HEIGHT}))
@@ -400,11 +400,10 @@ function __NodeStatus() {
 
     # get some info about node
     NODE_STATUS=$(timeout 5s ${COSMOS} status 2>&1 --node ${NODE} --home ${NODE_HOME})
-
     # if 'NODE_STATUS' response contains 'connection refused' > instant alarm
     if [[ ${NODE_STATUS} != *"connection refused"* ]] && [[ ${NODE_STATUS} != "" ]]; then
         # get the lastest node and explorer blocks height
-        LATEST_NODE_BLOCK=$(echo ${NODE_STATUS} | jq .'SyncInfo'.'latest_block_height' | tr -d '"')
+        LATEST_NODE_BLOCK=$(echo ${NODE_STATUS} | jq -r .'SyncInfo.latest_block_height')
         LATEST_CHAIN_BLOCK=$(__LastChainBlock)
 
         # if 'CURL' was not set > no compare with explorer height
@@ -430,8 +429,8 @@ function __NodeStatus() {
         if [[ ${SEND} == "0" ]]; then
 
             # check 'priv_key' actuality
-            CONSENSUS_PUBKEY=$(${COSMOS} q staking validator ${VALIDATOR_ADDRESS} -oj --node ${NODE} --home ${NODE_HOME} | jq -r ".consensus_pubkey.key")
-            CURRENT_PUBKEY=$(curl -s localhost:${PORT}/status | jq -r ".result.validator_info.pub_key.value")
+            CONSENSUS_PUBKEY=$(${COSMOS} q staking validator ${VALIDATOR_ADDRESS} --node ${NODE} --home ${NODE_HOME} --output json | jq -r '.consensus_pubkey.key')
+            CURRENT_PUBKEY=$(curl -s localhost:${PORT}/status | jq -r '.result.validator_info.pub_key.value')
             if [[ ${CONSENSUS_PUBKEY} == ${CURRENT_PUBKEY} ]]; then
                 PRIVKEY="right"
                 echo "${PRIVKEY_T} right."
@@ -448,8 +447,8 @@ function __NodeStatus() {
             fi
 
             # get validator info
-            VALIDATOR_INFO=$(${COSMOS} query staking validator ${VALIDATOR_ADDRESS} --node ${NODE} --output json --home ${NODE_HOME})
-            BOND_STATUS=$(echo ${VALIDATOR_INFO} | jq .'status' | tr -d '"')
+            VALIDATOR_INFO=$(${COSMOS} query staking validator ${VALIDATOR_ADDRESS} --node ${NODE} --home ${NODE_HOME} --output json)
+            BOND_STATUS=$(echo ${VALIDATOR_INFO} | jq -r '.status')
 
             # if 'BOND_STATUS' is different than 'BOND_STATUS_BONDED' > alarm
             if [[ "${BOND_STATUS}" != "BOND_STATUS_BONDED" ]]; then
@@ -457,7 +456,7 @@ function __NodeStatus() {
                 # if 'JAILED_STATUS' is 'true' > alarm with 'active > false.'
                 INACTIVE="true"
 
-                JAILED_STATUS=$(echo ${VALIDATOR_INFO} | jq .'jailed')
+                JAILED_STATUS=$(echo ${VALIDATOR_INFO} | jq '.jailed')
                 if [[ "${JAILED_STATUS}" == "true" ]]; then
                     if [[ ${IGNORE_WRONG_PRIVKEY} == "true" && ${PRIVKEY} == "wrong" ]]; then
                         TEXT="${JAILED_A} ${JAILED_STATUS}, but we know."
@@ -475,11 +474,11 @@ function __NodeStatus() {
             # if 'BOND_STATUS' is 'BOND_STATUS_BONDED' > continue
             else
                 # get local explorer snapshot and request some info about our validator
-                EXPLORER=$(${COSMOS} q staking validators --node ${NODE} --output json --home ${NODE_HOME} --limit=999999999)
-                VALIDATORS_COUNT=$(echo ${EXPLORER} | jq '.validators[] | select(.status=="BOND_STATUS_BONDED")' | jq -r '.tokens' | sort -gr | wc -l)
-                VALIDATOR_STRING=$(echo ${EXPLORER} | jq '.validators[] | select(.status=="BOND_STATUS_BONDED")' | jq -r '.tokens + " " + .description.moniker' | sort -gr | nl | grep -F ${MONIKER})
+                EXPLORER=$(${COSMOS} q staking validators --node ${NODE} --home ${NODE_HOME} --output json --limit=999999999)
+                VALIDATORS_COUNT=$(echo ${EXPLORER} | jq -r '.validators[] | select(.status=="BOND_STATUS_BONDED") | .tokens' | sort -gr | wc -l)
+                VALIDATOR_STRING=$(echo ${EXPLORER} | jq -r '.validators[] | select(.status=="BOND_STATUS_BONDED") | .tokens + " " + .description.moniker' | sort -gr | nl | grep -F ${MONIKER})
                 VALIDATOR_POSITION=$(echo ${VALIDATOR_STRING} | awk '{print $1}')
-                ACTIVE_VALIDATOR_SET=$(${COSMOS} q staking params --node ${NODE} --output json --home ${NODE_HOME} | jq ."max_validators")
+                ACTIVE_VALIDATOR_SET=$(${COSMOS} q staking params --node ${NODE} --home ${NODE_HOME} --output json | jq -r '.max_validators')
 
                 # alarm if validator is close to become inactive
                 SAFE_VALIDATOR_PLACE=$(echo ${ACTIVE_VALIDATOR_SET}-${POSITION_GAP_ALARM} | bc -l)
